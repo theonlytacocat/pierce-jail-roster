@@ -1,0 +1,11 @@
+{
+  "type": "module",
+  "name": "pierce-jail-roster",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "node scrape.js"
+  },
+  "dependencies": {
+    "playwright": "^1.44.0"
+  }
+}
