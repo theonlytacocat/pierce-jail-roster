@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
-import { scrapeRoster, scrapeDetail } from './scrapers/pierce.js';
+import { scrapeRoster, scrapeDetailBatch } from './scrapers/pierce.js';
 import { nowPST } from './utils.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -10,9 +10,14 @@ const DATA_DIR = path.join(__dirname, 'data');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
-const ROSTER_FILE  = path.join(DATA_DIR, 'roster.json');
-const LOG_FILE     = path.join(DATA_DIR, 'change_log.json');
-const STATUS_FILE  = path.join(DATA_DIR, 'status.json');
+const ROSTER_FILE = path.join(DATA_DIR, 'roster.json');
+const LOG_FILE    = path.join(DATA_DIR, 'change_log.json');
+const STATUS_FILE = path.join(DATA_DIR, 'status.json');
+
+// On first run the whole roster is "new". Fetching details for 500+ people
+// in one go is too slow. Skip details if there are too many new bookings —
+// the next run will pick up any genuinely new people with details.
+const DETAIL_BATCH_LIMIT = 30;
 
 function readJSON(file, fallback) {
   try {
@@ -22,7 +27,7 @@ function readJSON(file, fallback) {
 }
 
 function writeJSON(file, data) {
-  fs.writeFileSync(file, JSON.stringify(data, null, 2));
+  fs.writeFileSync(file, JSON.stringify(data));
 }
 
 async function run() {
@@ -49,54 +54,59 @@ async function run() {
 
   // New bookings
   const newBookings = inmates.filter(i => !previousIds.has(i.bookingNumber));
+  console.log(`  ${newBookings.length} new booking(s) found`);
+
+  // Fetch details — skip if too many new (first run) to avoid timeouts
+  let detailMap = {};
+  if (newBookings.length > 0 && newBookings.length <= DETAIL_BATCH_LIMIT) {
+    console.log(`  Fetching details for ${newBookings.length} new booking(s)...`);
+    try {
+      detailMap = await scrapeDetailBatch(newBookings.map(i => i.bookingNumber));
+    } catch (err) {
+      console.warn('  Detail batch failed:', err.message);
+    }
+  } else if (newBookings.length > DETAIL_BATCH_LIMIT) {
+    console.log(`  Skipping details (${newBookings.length} new bookings — likely first run)`);
+  }
+
   for (const inmate of newBookings) {
     console.log(`  NEW: ${inmate.name}`);
-
-    let detail = null;
-    try {
-      detail = await scrapeDetail(inmate.bookingNumber);
-    } catch (err) {
-      console.warn(`  Detail fetch failed for ${inmate.bookingNumber}:`, err.message);
-    }
+    const detail = detailMap[inmate.bookingNumber] || { kvPairs: {}, charges: [] };
 
     const entry = {
       bookingNumber: inmate.bookingNumber,
-      name: inmate.name,
-      facility: inmate.facility,
-      bookingDate: inmate.bookingDate,
-      status: 'in_custody',
-      firstSeen: nowPST(),
-      releasedAt: null,
-      charges: detail?.charges || [],
-      ...(detail?.kvPairs || {}),
+      name:          inmate.name,
+      facility:      inmate.facility,
+      bookingDate:   inmate.bookingDate,
+      status:        'in_custody',
+      firstSeen:     nowPST(),
+      releasedAt:    null,
+      charges:       detail.charges,
+      ...detail.kvPairs,
     };
 
     roster[inmate.bookingNumber] = entry;
-    log.unshift({ type: 'BOOKED', ...entry });
+    log.unshift(entry);
   }
 
   // Releases — in previous roster but not in current scrape
-  const released = [...previousIds].filter(
-    id => !currentIds.has(id) && roster[id]?.status === 'in_custody'
-  );
+  const releasedIds = new Set([
+    ...[...previousIds].filter(id => !currentIds.has(id) && roster[id]?.status === 'in_custody'),
+    ...inmates
+      .filter(i => i.status === 'released' && roster[i.bookingNumber]?.status === 'in_custody')
+      .map(i => i.bookingNumber),
+  ]);
 
-  // Also handle explicit release dates from the roster
-  for (const inmate of inmates) {
-    if (inmate.status === 'released' && roster[inmate.bookingNumber]?.status === 'in_custody') {
-      released.push(inmate.bookingNumber);
-    }
-  }
-
-  for (const id of [...new Set(released)]) {
+  for (const id of releasedIds) {
     const inmate = roster[id];
     if (!inmate) continue;
     console.log(`  RELEASED: ${inmate.name}`);
     const releasedAt = inmates.find(i => i.bookingNumber === id)?.releaseDate || nowPST();
-    roster[id].status = 'released';
+    roster[id].status     = 'released';
     roster[id].releasedAt = releasedAt;
     const logEntry = log.find(e => e.bookingNumber === id);
     if (logEntry) {
-      logEntry.status = 'released';
+      logEntry.status     = 'released';
       logEntry.releasedAt = releasedAt;
     }
   }
@@ -107,7 +117,7 @@ async function run() {
   const inCustody = Object.values(roster).filter(i => i.status === 'in_custody').length;
   writeJSON(STATUS_FILE, { inCustody, lastUpdated: nowPST() });
 
-  console.log(`[${nowPST()}] Done. ${newBookings.length} new, ${released.length} released. ${inCustody} in custody.`);
+  console.log(`[${nowPST()}] Done. ${newBookings.length} new, ${releasedIds.size} released. ${inCustody} in custody.`);
 }
 
 run().catch(err => {

@@ -1,6 +1,6 @@
 import { chromium } from 'playwright';
 
-const ROSTER_URL = 'https://linxonline.co.pierce.wa.us/linxweb/Booking/GetJailRoster.cfm';
+const ROSTER_URL  = 'https://linxonline.co.pierce.wa.us/linxweb/Booking/GetJailRoster.cfm';
 const DETAIL_BASE = 'https://linxonline.co.pierce.wa.us/linxweb/Booking/GetBooking.cfm?booking_id=';
 
 // Parse Julian-day-encoded booking ID into a date string
@@ -17,28 +17,27 @@ function bookingIdToDate(id) {
   } catch { return null; }
 }
 
-// Parse detail page HTML into structured data
+// Extract only the demographic fields we care about from detail page HTML
 function parseDetail(html) {
-  const field = (label) => {
-    const re = new RegExp(label + '[^<]*<[^>]+>\\s*([^<]+)', 'i');
-    const m = html.match(re);
-    return m ? m[1].trim() : null;
-  };
-
-  // Extract table rows as key-value pairs
+  // Key-value pairs from adjacent TD cells — only keep known demographic fields
+  const WANTED_KEYS = ['age', 'sex', 'gender', 'race', 'height', 'weight', 'hair', 'eyes'];
   const kvPairs = {};
-  const tdRe = /<td[^>]*>\s*([^<]+?)\s*<\/td>\s*<td[^>]*>\s*([^<]+?)\s*<\/td>/gi;
+  const tdRe = /<td[^>]*>\s*([^<]{1,60}?)\s*<\/td>\s*<td[^>]*>\s*([^<]{1,200}?)\s*<\/td>/gi;
   let m;
   while ((m = tdRe.exec(html)) !== null) {
     const key = m[1].replace(/[:\s]+$/, '').trim();
     const val = m[2].trim();
-    if (key && val && key.length < 40) kvPairs[key] = val;
+    if (key && val && WANTED_KEYS.includes(key.toLowerCase())) {
+      kvPairs[key] = val;
+    }
   }
 
   // Extract charges table
   const charges = [];
-  const chargeTableMatch = html.match(/<table[^>]*>[\s\S]*?<\/table>/gi) || [];
-  for (const tbl of chargeTableMatch) {
+  const tableRe = /<table[^>]*>([\s\S]*?)<\/table>/gi;
+  let tableMatch;
+  while ((tableMatch = tableRe.exec(html)) !== null) {
+    const tbl = tableMatch[0];
     const rows = tbl.match(/<tr[\s\S]*?<\/tr>/gi) || [];
     if (rows.length < 2) continue;
     const headers = (rows[0].match(/<t[hd][^>]*>([^<]*)<\/t[hd]>/gi) || [])
@@ -49,9 +48,12 @@ function parseDetail(html) {
         .map(c => c.replace(/<[^>]+>/g, '').trim());
       if (cells.length === 0 || cells.every(c => !c)) continue;
       const charge = {};
-      headers.forEach((h, idx) => { if (cells[idx]) charge[h] = cells[idx]; });
+      headers.forEach((h, idx) => {
+        if (cells[idx] && cells[idx].length < 300) charge[h] = cells[idx];
+      });
       if (Object.keys(charge).length > 0) charges.push(charge);
     }
+    break; // only use the first matching table
   }
 
   return { kvPairs, charges };
@@ -64,63 +66,76 @@ export async function scrapeRoster() {
   });
   const page = await context.newPage();
 
-  console.log('Loading roster page...');
-  await page.goto(ROSTER_URL, { waitUntil: 'networkidle', timeout: 30000 });
+  try {
+    console.log('Loading roster page...');
+    await page.goto(ROSTER_URL, { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForSelector('table tr td', { timeout: 20000 }).catch(() => {});
 
-  // Wait for the actual roster table to appear after reCAPTCHA auto-submits
-  await page.waitForSelector('table tr td', { timeout: 20000 }).catch(() => {});
+    const html = await page.content();
 
-  const html = await page.content();
+    const inmates = [];
+    const rowRe = /<tr[\s\S]*?<\/tr>/gi;
+    let rowMatch;
+    while ((rowMatch = rowRe.exec(html)) !== null) {
+      const row = rowMatch[0];
+      if (!row.includes('GetBooking.cfm')) continue;
 
-  // Parse roster table
-  const inmates = [];
-  const rowRe = /<tr[\s\S]*?<\/tr>/gi;
-  let rowMatch;
-  while ((rowMatch = rowRe.exec(html)) !== null) {
-    const row = rowMatch[0];
-    if (!row.includes('GetBooking.cfm')) continue;
+      const nameMatch    = row.match(/<td[^>]*nowrap[^>]*>\s*([^<]+)\s*<\/td>/i);
+      const bookingMatch = row.match(/booking_id=(\d+)/);
+      const facilityMatch    = row.match(/<td[^>]*>\s*((?:Main|New) Jail)\s*<\/td>/i);
+      const releaseDateMatch = row.match(/<td[^>]*>\s*(\d{1,2}\/\d{1,2}\/\d{4})\s*<\/td>/i);
 
-    const nameMatch = row.match(/<td[^>]*nowrap[^>]*>\s*([^<]+)\s*<\/td>/i);
-    const bookingMatch = row.match(/booking_id=(\d+)/);
-    const facilityMatch = row.match(/<td[^>]*>\s*((?:Main|New) Jail)\s*<\/td>/i);
-    const releaseDateMatch = row.match(/<td[^>]*>\s*(\d{1,2}\/\d{1,2}\/\d{4})\s*<\/td>/i);
+      if (!nameMatch || !bookingMatch) continue;
 
-    if (!nameMatch || !bookingMatch) continue;
+      inmates.push({
+        name:          nameMatch[1].trim(),
+        bookingNumber: bookingMatch[1],
+        facility:      facilityMatch ? facilityMatch[1].trim() : null,
+        releaseDate:   releaseDateMatch ? releaseDateMatch[1].trim() : null,
+        bookingDate:   bookingIdToDate(bookingMatch[1]),
+        status:        releaseDateMatch ? 'released' : 'in_custody',
+      });
+    }
 
-    inmates.push({
-      name: nameMatch[1].trim(),
-      bookingNumber: bookingMatch[1],
-      facility: facilityMatch ? facilityMatch[1].trim() : null,
-      releaseDate: releaseDateMatch ? releaseDateMatch[1].trim() : null,
-      bookingDate: bookingIdToDate(bookingMatch[1]),
-      status: releaseDateMatch ? 'released' : 'in_custody',
-    });
+    console.log(`Parsed ${inmates.length} inmates from roster`);
+    return inmates;
+  } finally {
+    await browser.close();
   }
-
-  console.log(`Parsed ${inmates.length} inmates from roster`);
-  await browser.close();
-  return inmates;
 }
 
-export async function scrapeDetail(bookingNumber) {
+// Scrape detail pages for a batch of booking numbers in ONE shared browser session.
+// Returns a map of bookingNumber → { kvPairs, charges }
+export async function scrapeDetailBatch(bookingNumbers) {
+  if (bookingNumbers.length === 0) return {};
+
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   });
   const page = await context.newPage();
+  const results = {};
 
   try {
-    // Need to hit roster first to get session/pass CAPTCHA
+    // Hit roster once to pass CAPTCHA — then reuse the session for all detail pages
+    console.log('  Opening browser session for detail pages...');
     await page.goto(ROSTER_URL, { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForSelector('table tr td', { timeout: 20000 }).catch(() => {});
 
-    // Now navigate to detail page in same session
-    await page.goto(DETAIL_BASE + bookingNumber, { waitUntil: 'networkidle', timeout: 20000 });
-    await page.waitForSelector('table', { timeout: 10000 }).catch(() => {});
-
-    const html = await page.content();
-    return parseDetail(html);
+    for (const bookingNumber of bookingNumbers) {
+      try {
+        await page.goto(DETAIL_BASE + bookingNumber, { waitUntil: 'networkidle', timeout: 20000 });
+        await page.waitForSelector('table', { timeout: 10000 }).catch(() => {});
+        const html = await page.content();
+        results[bookingNumber] = parseDetail(html);
+      } catch (err) {
+        console.warn(`  Detail fetch failed for ${bookingNumber}:`, err.message);
+        results[bookingNumber] = { kvPairs: {}, charges: [] };
+      }
+    }
   } finally {
     await browser.close();
   }
+
+  return results;
 }
