@@ -49,7 +49,9 @@ function parseDetail(html) {
       if (cells.length === 0 || cells.every(c => !c)) continue;
       const charge = {};
       headers.forEach((h, idx) => {
-        if (cells[idx] && cells[idx].length < 300) charge[h] = cells[idx];
+        if (!cells[idx] || cells[idx].length >= 300) return;
+        const key = h === 'court date' ? 'charge' : h === 'rls date/time' ? 'releaseDate' : h;
+        charge[key] = cells[idx];
       });
       if (Object.keys(charge).length > 0) charges.push(charge);
     }
