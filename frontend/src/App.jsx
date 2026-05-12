@@ -66,7 +66,7 @@ function InCustodyPage() {
     ]).then(([logData, statusData]) => {
       const inCustody = logData
         .filter(e => e.status === 'in_custody')
-        .sort((a, b) => new Date(b.firstSeen) - new Date(a.firstSeen))
+        .sort((a, b) => new Date(b.bookingDate) - new Date(a.bookingDate))
       setLog(inCustody)
       setStatus(statusData)
       setLoading(false)
@@ -94,7 +94,7 @@ function InCustodyPage() {
           <Link to="/deepstats">Stats</Link>
         </div>
       </div>
-      {loading ? <div className="loading">Loading records...</div> : <BookingLog entries={filtered} grouped />}
+      {loading ? <div className="loading">Loading records...</div> : <BookingLog entries={filtered} grouped groupBy="bookingDate" />}
     </div>
   )
 }
