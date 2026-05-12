@@ -72,6 +72,7 @@ async function run() {
   for (const inmate of newBookings) {
     console.log(`  NEW: ${inmate.name}`);
     const detail = detailMap[inmate.bookingNumber] || { kvPairs: {}, charges: [] };
+    const hasDetail = !!detailMap[inmate.bookingNumber];
 
     const entry = {
       bookingNumber: inmate.bookingNumber,
@@ -82,11 +83,36 @@ async function run() {
       firstSeen:     nowPST(),
       releasedAt:    null,
       charges:       detail.charges,
+      hasDetail,
       ...detail.kvPairs,
     };
 
     roster[inmate.bookingNumber] = entry;
     log.unshift(entry);
+  }
+
+  // Backfill details for existing entries that were skipped on first run
+  const BACKFILL_BATCH = 30;
+  const needsDetail = Object.values(roster)
+    .filter(e => !e.hasDetail && e.status === 'in_custody')
+    .slice(0, BACKFILL_BATCH)
+    .map(e => e.bookingNumber);
+
+  if (needsDetail.length > 0) {
+    console.log(`  Backfilling details for ${needsDetail.length} existing booking(s)...`);
+    try {
+      const backfillMap = await scrapeDetailBatch(needsDetail);
+      for (const id of needsDetail) {
+        const detail = backfillMap[id];
+        if (!detail) continue;
+        roster[id] = { ...roster[id], charges: detail.charges, hasDetail: true, ...detail.kvPairs };
+        const logEntry = log.find(e => e.bookingNumber === id);
+        if (logEntry) Object.assign(logEntry, { charges: detail.charges, hasDetail: true, ...detail.kvPairs });
+      }
+      console.log(`  Backfill done.`);
+    } catch (err) {
+      console.warn('  Backfill failed:', err.message);
+    }
   }
 
   // Releases — in previous roster but not in current scrape
