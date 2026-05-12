@@ -53,7 +53,7 @@ function parseDetail(html) {
         const key = h === 'court date' ? 'charge' : h === 'rls date/time' ? 'releaseDate' : h;
         charge[key] = cells[idx];
       });
-      if (Object.keys(charge).length > 0) charges.push(charge);
+      if (Object.keys(charge).length > 0 && !/^WA\d+/i.test(charge.charge || '')) charges.push(charge);
     }
     break; // only use the first matching table
   }
