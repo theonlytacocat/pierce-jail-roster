@@ -42,6 +42,7 @@ function parseDetail(html) {
     if (rows.length < 2) continue;
     const headers = (rows[0].match(/<t[hd][^>]*>([^<]*)<\/t[hd]>/gi) || [])
       .map(h => h.replace(/<[^>]+>/g, '').trim().toLowerCase());
+    console.log(`  [detail] table headers: ${headers.join(' | ')}`);
     if (!headers.some(h => /charge|violation|offense/i.test(h))) continue;
     for (let i = 1; i < rows.length; i++) {
       const cells = (rows[i].match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi) || [])
