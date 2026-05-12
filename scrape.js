@@ -92,7 +92,7 @@ async function run() {
   }
 
   // Backfill details for existing entries that were skipped on first run
-  const BACKFILL_BATCH = 30;
+  const BACKFILL_BATCH = 100;
   const needsDetail = Object.values(roster)
     .filter(e => !e.hasDetail && e.status === 'in_custody')
     .slice(0, BACKFILL_BATCH)
