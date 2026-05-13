@@ -198,7 +198,7 @@ export default function DeepStatsPage() {
           <Link to="/">In Custody</Link>
           <Link to="/released">Released</Link>
           <Link to="/history">History</Link>
-          <Link to="/deepstats" className="active">Stats</Link>
+          <Link to="/stats">Stats</Link>
         </div>
       </div>
 

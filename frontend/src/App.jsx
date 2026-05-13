@@ -5,6 +5,7 @@ import StatBar from './components/StatBar'
 import BookingCard from './components/BookingCard'
 import HistoryLog from './components/HistoryLog'
 import DeepStatsPage from './components/DeepStats'
+import StatsPage from './components/Stats'
 
 function getDateLabel(entry, field = 'firstSeen') {
   const raw = entry[field] || entry.bookingDate || ''
@@ -91,7 +92,7 @@ function InCustodyPage() {
           <Link to="/" className="active">In Custody</Link>
           <Link to="/released">Released</Link>
           <Link to="/history">History</Link>
-          <Link to="/deepstats">Stats</Link>
+          <Link to="/stats">Stats</Link>
         </div>
       </div>
       {loading ? <div className="loading">Loading records...</div> : <BookingLog entries={filtered} grouped groupBy="bookingDate" />}
@@ -131,7 +132,7 @@ function ReleasedPage() {
           <Link to="/">In Custody</Link>
           <Link to="/released" className="active">Released</Link>
           <Link to="/history">History</Link>
-          <Link to="/deepstats">Stats</Link>
+          <Link to="/stats">Stats</Link>
         </div>
       </div>
       {loading ? <div className="loading">Loading records...</div> : <BookingLog entries={filtered} grouped groupBy="releasedAt" />}
@@ -158,7 +159,7 @@ function HistoryPage() {
           <Link to="/">In Custody</Link>
           <Link to="/released">Released</Link>
           <Link to="/history" className="active">History</Link>
-          <Link to="/deepstats">Stats</Link>
+          <Link to="/stats">Stats</Link>
         </div>
       </div>
       {loading ? <div className="loading">Loading records...</div> : <HistoryLog entries={log} />}
@@ -173,6 +174,7 @@ export default function App() {
         <Route path="/" element={<InCustodyPage />} />
         <Route path="/released" element={<ReleasedPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/stats" element={<StatsPage />} />
         <Route path="/deepstats" element={<DeepStatsPage />} />
       </Routes>
     </HashRouter>
