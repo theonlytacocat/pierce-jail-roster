@@ -51,6 +51,17 @@ function fmtDays(d) {
   return `${d.toFixed(1)}d`
 }
 
+function fmtDuration(days) {
+  if (days == null) return '—'
+  const mins = Math.round(days * 1440)
+  const d = Math.floor(mins / 1440)
+  const h = Math.floor((mins % 1440) / 60)
+  const m = mins % 60
+  if (d > 0) return `${d}d ${h}h ${m}m`
+  if (h > 0) return `${h}h ${m}m`
+  return `${m}m`
+}
+
 function med(arr) {
   if (!arr.length) return 0
   const s = [...arr].sort((a, b) => a - b)
@@ -120,9 +131,43 @@ function compute(log) {
     .sort((a, b) => b.avg - a.avg)
     .slice(0, 25)
 
+  // Release day of week
+  const byReleaseDow = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 }
+  for (const e of released) {
+    if (!e.releasedAt) continue
+    const d = new Date(e.releasedAt)
+    if (!isNaN(d)) byReleaseDow[DOW[d.getDay()]]++
+  }
+
+  // Time served stats
+  const relWithStay = released
+    .map(e => ({ name: e.name, days: parseStay(e) }))
+    .filter(e => e.days !== null)
+    .sort((a, b) => a.days - b.days)
+  const pctUnder24h = stays.length ? ((stays.filter(d => d < 1).length / stays.length) * 100).toFixed(1) : 0
+  const shortestStay = relWithStay[0] || null
+  const longestHistorical = relWithStay[relWithStay.length - 1] || null
+  const longestCurrent = log
+    .filter(e => e.status === 'in_custody' && e.bookingDate)
+    .map(e => {
+      const booked = new Date(e.bookingDate)
+      return { name: e.name, bookingDate: e.bookingDate, days: !isNaN(booked) ? (Date.now() - booked) / 86400000 : 0 }
+    })
+    .sort((a, b) => b.days - a.days)[0] || null
+
+  // Recidivism with charges
   const nameCt = {}
   for (const e of log) if (e.name) nameCt[e.name] = (nameCt[e.name] || 0) + 1
-  const repeats = Object.entries(nameCt).filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1])
+  const nameCharges = {}
+  for (const e of log) {
+    if (!e.name || nameCt[e.name] < 2) continue
+    if (!nameCharges[e.name]) nameCharges[e.name] = new Set()
+    for (const c of (e.charges || [])) if (c.charge) nameCharges[e.name].add(c.charge)
+  }
+  const repeats = Object.entries(nameCt)
+    .filter(([, n]) => n >= 2)
+    .sort((a, b) => b[1] - a[1])
+    .map(([name, n]) => ({ name, n, charges: nameCharges[name] ? [...nameCharges[name]].join(', ') : '—' }))
 
   const totalCharges = log.reduce((s, e) => s + (e.charges?.length || 0), 0)
 
@@ -134,9 +179,11 @@ function compute(log) {
     medStay: med(stays),
     avgCharges: log.length ? totalCharges / log.length : 0,
     byMonth: Object.entries(byMonth).sort(),
-    byDow,
+    byDow, byReleaseDow,
     chargeCt, facCt, raceCt, genderCt,
-    detention, repeats,
+    detention,
+    pctUnder24h, shortestStay, longestHistorical, longestCurrent,
+    repeats,
     uniqueNames: Object.keys(nameCt).length,
   }
 }
@@ -213,12 +260,16 @@ function TrendsTab({ s }) {
   const maxM = Math.max(...s.byMonth.map(([, v]) => v), 1)
   const dowEntries = Object.entries(s.byDow)
   const maxDow = Math.max(...dowEntries.map(([, v]) => v), 1)
+  const relDowEntries = Object.entries(s.byReleaseDow)
+  const maxRelDow = Math.max(...relDowEntries.map(([, v]) => v), 1)
   return (
     <>
       <h3 className="stats-h3">Bookings by Month</h3>
       {s.byMonth.map(([m, n]) => <HBar key={m} label={m} value={n} max={maxM} count={n} />)}
       <h3 className="stats-h3 stats-h3-gap">Bookings by Day of Week</h3>
       {dowEntries.map(([day, n]) => <HBar key={day} label={day} value={n} max={maxDow} count={n} />)}
+      <h3 className="stats-h3 stats-h3-gap">Releases by Day of Week</h3>
+      {relDowEntries.map(([day, n]) => <HBar key={day} label={day} value={n} max={maxRelDow} count={n} />)}
     </>
   )
 }
@@ -248,24 +299,58 @@ function DemographicsTab({ s }) {
 }
 
 function DetentionTab({ s }) {
-  if (!s.detention.length) return <div className="stats-note">Not enough release data yet.</div>
   return (
     <>
-      <h3 className="stats-h3">Avg Detention by Charge</h3>
-      <div className="stats-note">Released bookings only · ≥3 data points per charge</div>
-      <table className="stats-table">
-        <thead><tr><th>Charge</th><th>Avg</th><th>Median</th><th>n</th></tr></thead>
-        <tbody>
-          {s.detention.map(r => (
-            <tr key={r.charge}>
-              <td>{r.charge}</td>
-              <td>{fmtDays(r.avg)}</td>
-              <td>{fmtDays(r.med)}</td>
-              <td>{r.n}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <div className="sboxes" style={{ marginBottom: '2rem' }}>
+        <div className="sbox">
+          <div className="sbox-val">{s.pctUnder24h}%</div>
+          <div className="sbox-label">Released in &lt;24 Hours</div>
+          <div className="sbox-sub">{s.stays?.filter ? '' : ''}{s.released > 0 ? `${Math.round(s.released * s.pctUnder24h / 100)} of ${s.released}` : '—'}</div>
+        </div>
+        {s.shortestStay && (
+          <div className="sbox">
+            <div className="sbox-val">{fmtDuration(s.shortestStay.days)}</div>
+            <div className="sbox-label">Shortest Stay</div>
+            <div className="sbox-sub">{s.shortestStay.name}</div>
+          </div>
+        )}
+        {s.longestHistorical && (
+          <div className="sbox">
+            <div className="sbox-val">{fmtDuration(s.longestHistorical.days)}</div>
+            <div className="sbox-label">Longest Historical Stay</div>
+            <div className="sbox-sub">{s.longestHistorical.name}</div>
+          </div>
+        )}
+        {s.longestCurrent && (
+          <div className="sbox">
+            <div className="sbox-val">{fmtDuration(s.longestCurrent.days)}</div>
+            <div className="sbox-label">Current Longest Stay</div>
+            <div className="sbox-sub">In since {s.longestCurrent.bookingDate}</div>
+          </div>
+        )}
+      </div>
+
+      {!s.detention.length ? (
+        <div className="stats-note">Not enough release data yet for charge breakdown.</div>
+      ) : (
+        <>
+          <h3 className="stats-h3">Avg Detention by Charge</h3>
+          <div className="stats-note">Released bookings only · ≥3 data points per charge</div>
+          <table className="stats-table">
+            <thead><tr><th>Charge</th><th>Avg</th><th>Median</th><th>n</th></tr></thead>
+            <tbody>
+              {s.detention.map(r => (
+                <tr key={r.charge}>
+                  <td>{r.charge}</td>
+                  <td>{fmtDays(r.avg)}</td>
+                  <td>{fmtDays(r.med)}</td>
+                  <td>{r.n}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </>
   )
 }
@@ -281,10 +366,14 @@ function RecidivismTab({ s }) {
         <div className="stats-note">No repeat bookings yet.</div>
       ) : (
         <table className="stats-table">
-          <thead><tr><th>Name</th><th>Bookings</th></tr></thead>
+          <thead><tr><th>Name</th><th>Bookings</th><th>Charges</th></tr></thead>
           <tbody>
-            {s.repeats.slice(0, 30).map(([name, n]) => (
-              <tr key={name}><td>{name}</td><td>{n}</td></tr>
+            {s.repeats.slice(0, 30).map(r => (
+              <tr key={r.name}>
+                <td>{r.name}</td>
+                <td>{r.n}</td>
+                <td style={{ color: '#8AAA96', fontSize: '0.72rem' }}>{r.charges}</td>
+              </tr>
             ))}
           </tbody>
         </table>
