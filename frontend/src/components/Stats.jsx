@@ -47,19 +47,19 @@ export default function StatsPage() {
       for (const c of (e.charges || []))
         if (c.charge) chargeCt[c.charge] = (chargeCt[c.charge] || 0) + 1
 
-    const raceCt = {}, sexCt = {}
+    const raceCt = {}, genderCt = {}
     for (const e of log) {
       const r = e.Race || e.race || 'Unknown'
-      const sx = e.Sex || e.sex || 'Unknown'
+      const g = e.Gender || e.gender || e.Sex || e.sex || 'Unknown'
       raceCt[r] = (raceCt[r] || 0) + 1
-      sexCt[sx] = (sexCt[sx] || 0) + 1
+      genderCt[g] = (genderCt[g] || 0) + 1
     }
 
     const topCharges = Object.entries(chargeCt).sort((a, b) => b[1] - a[1]).slice(0, 15)
     const topRaces = Object.entries(raceCt).sort((a, b) => b[1] - a[1]).slice(0, 8)
-    const topSex = Object.entries(sexCt).sort((a, b) => b[1] - a[1])
+    const topGender = Object.entries(genderCt).sort((a, b) => b[1] - a[1])
 
-    return { total, inCustody, released, topCharges, topRaces, topSex }
+    return { total, inCustody, released, topCharges, topRaces, topGender }
   }, [log])
 
   return (
@@ -95,9 +95,9 @@ export default function StatsPage() {
             <HBar key={r} label={r} value={n} max={s.total} pct={((n / s.total) * 100).toFixed(1)} />
           ))}
 
-          <h3 className="stats-h3 stats-h3-gap">Sex</h3>
-          {s.topSex.map(([sx, n]) => (
-            <HBar key={sx} label={sx} value={n} max={s.total} pct={((n / s.total) * 100).toFixed(1)} />
+          <h3 className="stats-h3 stats-h3-gap">Gender</h3>
+          {s.topGender.map(([g, n]) => (
+            <HBar key={g} label={g} value={n} max={s.total} pct={((n / s.total) * 100).toFixed(1)} />
           ))}
         </div>
       )}

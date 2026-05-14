@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import Header from './Header'
 
-const TABS = ['Summary', 'Trends', 'Charges', 'Demographics', 'Detention', 'Recidivism', 'Physical']
+const TABS = ['Summary', 'Trends', 'Charges', 'Demographics', 'Detention', 'Recidivism']
 
 function HBar({ label, value, max, count }) {
   const pct = max > 0 ? Math.max(2, (value / max) * 100) : 0
@@ -87,27 +87,21 @@ function compute(log) {
     facCt[f] = (facCt[f] || 0) + 1
   }
 
-  const raceCt = {}, sexCt = {}
+  const raceCt = {}, genderCt = {}
   for (const e of log) {
     const r = e.Race || e.race || 'Unknown'
-    const s = e.Sex || e.sex || 'Unknown'
+    const g = e.Gender || e.gender || e.Sex || e.sex || 'Unknown'
     raceCt[r] = (raceCt[r] || 0) + 1
-    sexCt[s] = (sexCt[s] || 0) + 1
+    genderCt[g] = (genderCt[g] || 0) + 1
   }
 
-  const ageBuckets = { '18–25': 0, '26–35': 0, '36–45': 0, '46–55': 0, '56–65': 0, '65+': 0 }
-  const ages = []
+  // Day of week from bookingDate
+  const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const byDow = { Sun: 0, Mon: 0, Tue: 0, Wed: 0, Thu: 0, Fri: 0, Sat: 0 }
   for (const e of log) {
-    const a = parseInt(e.Age || e.age)
-    if (!isNaN(a) && a > 0 && a < 120) {
-      ages.push(a)
-      if (a <= 25) ageBuckets['18–25']++
-      else if (a <= 35) ageBuckets['26–35']++
-      else if (a <= 45) ageBuckets['36–45']++
-      else if (a <= 55) ageBuckets['46–55']++
-      else if (a <= 65) ageBuckets['56–65']++
-      else ageBuckets['65+']++
-    }
+    if (!e.bookingDate) continue
+    const d = new Date(e.bookingDate)
+    if (!isNaN(d)) byDow[DOW[d.getDay()]]++
   }
 
   const stayByCh = {}
@@ -130,34 +124,6 @@ function compute(log) {
   for (const e of log) if (e.name) nameCt[e.name] = (nameCt[e.name] || 0) + 1
   const repeats = Object.entries(nameCt).filter(([, n]) => n >= 2).sort((a, b) => b[1] - a[1])
 
-  const phys = {}
-  for (const e of log) {
-    const sex = (e.Sex || e.sex || '').toUpperCase()
-    if (!['MALE', 'FEMALE'].includes(sex)) continue
-    const ht = parseHt(e.Height || e.height)
-    const wt = parseWt(e.Weight || e.weight)
-    if (!ht && !wt) continue
-    const race = e.Race || e.race || 'Unknown'
-    for (const c of (e.charges || [])) {
-      if (!c.charge) continue
-      const k = `${sex}|||${c.charge}`
-      if (!phys[k]) phys[k] = { sex, charge: c.charge, ht: [], wt: [], races: {} }
-      if (ht) phys[k].ht.push(ht)
-      if (wt) phys[k].wt.push(wt)
-      phys[k].races[race] = (phys[k].races[race] || 0) + 1
-    }
-  }
-  const physRows = { MALE: [], FEMALE: [] }
-  for (const d of Object.values(phys)) {
-    const n = Math.max(d.ht.length, d.wt.length)
-    if (n < 3) continue
-    const avgHt = d.ht.length ? Math.round(d.ht.reduce((a, b) => a + b, 0) / d.ht.length) : null
-    const avgWt = d.wt.length ? Math.round(d.wt.reduce((a, b) => a + b, 0) / d.wt.length) : null
-    physRows[d.sex]?.push({ charge: d.charge, avgHt, avgWt, topRace: top(d.races, 1)[0]?.[0] || '—', n })
-  }
-  physRows.MALE.sort((a, b) => b.n - a.n)
-  physRows.FEMALE.sort((a, b) => b.n - a.n)
-
   const totalCharges = log.reduce((s, e) => s + (e.charges?.length || 0), 0)
 
   return {
@@ -168,10 +134,10 @@ function compute(log) {
     medStay: med(stays),
     avgCharges: log.length ? totalCharges / log.length : 0,
     byMonth: Object.entries(byMonth).sort(),
-    chargeCt, facCt, raceCt, sexCt, ageBuckets, ages,
+    byDow,
+    chargeCt, facCt, raceCt, genderCt,
     detention, repeats,
     uniqueNames: Object.keys(nameCt).length,
-    physRows,
   }
 }
 
@@ -219,7 +185,6 @@ export default function DeepStatsPage() {
           {tab === 'Demographics' && <DemographicsTab s={s} />}
           {tab === 'Detention' && <DetentionTab s={s} />}
           {tab === 'Recidivism' && <RecidivismTab s={s} />}
-          {tab === 'Physical' && <PhysicalTab s={s} />}
         </div>
       )}
     </div>
@@ -246,10 +211,14 @@ function SummaryTab({ s }) {
 
 function TrendsTab({ s }) {
   const maxM = Math.max(...s.byMonth.map(([, v]) => v), 1)
+  const dowEntries = Object.entries(s.byDow)
+  const maxDow = Math.max(...dowEntries.map(([, v]) => v), 1)
   return (
     <>
       <h3 className="stats-h3">Bookings by Month</h3>
       {s.byMonth.map(([m, n]) => <HBar key={m} label={m} value={n} max={maxM} count={n} />)}
+      <h3 className="stats-h3 stats-h3-gap">Bookings by Day of Week</h3>
+      {dowEntries.map(([day, n]) => <HBar key={day} label={day} value={n} max={maxDow} count={n} />)}
     </>
   )
 }
@@ -267,21 +236,13 @@ function ChargesTab({ s }) {
 
 function DemographicsTab({ s }) {
   const raceE = top(s.raceCt, 10)
-  const sexE = top(s.sexCt, 5)
-  const ageMax = Math.max(...Object.values(s.ageBuckets), 1)
+  const genderE = top(s.genderCt, 5)
   return (
     <>
       <h3 className="stats-h3">Race</h3>
       {raceE.map(([r, n]) => <HBar key={r} label={r} value={n} max={s.total} count={n} />)}
-      <h3 className="stats-h3 stats-h3-gap">Sex</h3>
-      {sexE.map(([sx, n]) => <HBar key={sx} label={sx} value={n} max={s.total} count={n} />)}
-      <h3 className="stats-h3 stats-h3-gap">Age Distribution</h3>
-      {Object.entries(s.ageBuckets).map(([b, n]) => <HBar key={b} label={b} value={n} max={ageMax} count={n} />)}
-      {s.ages.length > 0 && (
-        <div className="stats-note">
-          Min {Math.min(...s.ages)} · Median {med(s.ages).toFixed(0)} · Mean {(s.ages.reduce((a, b) => a + b, 0) / s.ages.length).toFixed(1)} · Max {Math.max(...s.ages)}
-        </div>
-      )}
+      <h3 className="stats-h3 stats-h3-gap">Gender</h3>
+      {genderE.map(([g, n]) => <HBar key={g} label={g} value={n} max={s.total} count={n} />)}
     </>
   )
 }
@@ -332,36 +293,3 @@ function RecidivismTab({ s }) {
   )
 }
 
-function PhysicalTab({ s }) {
-  const hasMale = s.physRows.MALE.length > 0
-  const hasFemale = s.physRows.FEMALE.length > 0
-  if (!hasMale && !hasFemale) return (
-    <div className="stats-note">Not enough physical data yet — still backfilling details.</div>
-  )
-  return (
-    <>
-      <div className="stats-note stats-note-gap">Avg height/weight per charge by sex · ≥3 data points</div>
-      {['MALE', 'FEMALE'].map(sex => (
-        s.physRows[sex].length > 0 && (
-          <div key={sex}>
-            <h3 className="stats-h3 stats-h3-gap">{sex === 'MALE' ? 'Male' : 'Female'}</h3>
-            <table className="stats-table">
-              <thead><tr><th>Charge</th><th>Avg Wt</th><th>Avg Ht</th><th>Top Race</th><th>n</th></tr></thead>
-              <tbody>
-                {s.physRows[sex].map(r => (
-                  <tr key={r.charge}>
-                    <td>{r.charge}</td>
-                    <td>{r.avgWt ? `${r.avgWt} lbs` : '—'}</td>
-                    <td>{r.avgHt ? fmtHt(r.avgHt) : '—'}</td>
-                    <td>{r.topRace}</td>
-                    <td>{r.n}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )
-      ))}
-    </>
-  )
-}
