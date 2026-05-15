@@ -17,12 +17,15 @@ function bookingIdToDate(id) {
   } catch { return null; }
 }
 
-// Extract only the demographic fields we care about from detail page HTML
+// Extract fields from the detail page header section and charges table
 function parseDetail(html) {
-  // Key-value pairs from adjacent TD cells — only keep known demographic fields
-  const WANTED_KEYS = ['age', 'sex', 'gender', 'race', 'height', 'weight', 'hair', 'eyes'];
+  // Key-value pairs from adjacent TD cells in the booking info section
+  const WANTED_KEYS = [
+    'age', 'sex', 'gender', 'race', 'ethnicity', 'height', 'weight', 'hair', 'eyes',
+    'arresting agency', 'booking date / time', 'booking date', 'future release date / time',
+  ];
   const kvPairs = {};
-  const tdRe = /<td[^>]*>\s*([^<]{1,60}?)\s*<\/td>\s*<td[^>]*>\s*([^<]{1,200}?)\s*<\/td>/gi;
+  const tdRe = /<td[^>]*>\s*([^<]{1,80}?)\s*<\/td>\s*<td[^>]*>\s*([^<]{1,300}?)\s*<\/td>/gi;
   let m;
   while ((m = tdRe.exec(html)) !== null) {
     const key = m[1].replace(/[:\s]+$/, '').trim();
@@ -43,17 +46,56 @@ function parseDetail(html) {
     const headers = (rows[0].match(/<t[hd][^>]*>([^<]*)<\/t[hd]>/gi) || [])
       .map(h => h.replace(/<[^>]+>/g, '').trim().toLowerCase());
     if (!headers.some(h => /charge|violation|offense|counts/i.test(h))) continue;
+
     for (let i = 1; i < rows.length; i++) {
       const cells = (rows[i].match(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi) || [])
         .map(c => c.replace(/<[^>]+>/g, '').trim());
       if (cells.length === 0 || cells.every(c => !c)) continue;
+
+      // Statute rows (WA + digits): attach cause number to previous charge and skip
+      if (/^WA\d+/i.test(cells[0] || '')) {
+        if (charges.length > 0) {
+          const causeCell = cells.find(c => /^\d{2,4}-\d+-\d{4,6}-\d+$/.test(c.trim()));
+          if (causeCell && !charges[charges.length - 1].causeNumber) {
+            charges[charges.length - 1].causeNumber = causeCell.trim();
+          }
+        }
+        continue;
+      }
+
+      // Build charge from header-mapped fields
       const charge = {};
       headers.forEach((h, idx) => {
         if (!cells[idx] || cells[idx].length >= 300) return;
         const key = h === 'court date' ? 'charge' : h === 'rls date/time' ? 'releaseDate' : h;
         charge[key] = cells[idx];
       });
-      if (Object.keys(charge).length > 0 && !/^WA\d+/i.test(charge.charge || '')) charges.push(charge);
+
+      if (!charge.charge) continue;
+
+      // Scan all cells for bail amount ($NNN,NNN...)
+      const bailCell = cells.find(c => /\$[\d,]+/.test(c));
+      if (bailCell) {
+        const bm = bailCell.match(/\$([\d,]+)/);
+        if (bm) charge.bail = parseInt(bm[1].replace(/,/g, ''), 10);
+      }
+
+      // Charging agency (all-caps org name)
+      const agencyCell = cells.find(c =>
+        c.length > 5 && c.length < 100 &&
+        /POLICE|SHERIFF|DEPT|DEPARTMENT|CORRECTIONS|PROBATION|STATE PATROL|TRIBAL|WSP/i.test(c) &&
+        c !== charge.charge
+      );
+      if (agencyCell) charge.chargingAgency = agencyCell;
+
+      // Jurisdiction/court
+      const courtCell = cells.find(c =>
+        c.length > 4 && c.length < 80 &&
+        /COURT|SUPERIOR|DISTRICT|MUNICIPAL|FEDERAL/i.test(c)
+      );
+      if (courtCell) charge.jurisdiction = courtCell;
+
+      charges.push(charge);
     }
     break; // only use the first matching table
   }

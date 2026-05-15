@@ -75,15 +75,16 @@ async function run() {
     const hasDetail = !!detailMap[inmate.bookingNumber];
 
     const entry = {
-      bookingNumber: inmate.bookingNumber,
-      name:          inmate.name,
-      facility:      inmate.facility,
-      bookingDate:   inmate.bookingDate,
-      status:        'in_custody',
-      firstSeen:     nowPST(),
-      releasedAt:    null,
-      charges:       detail.charges,
+      bookingNumber:   inmate.bookingNumber,
+      name:            inmate.name,
+      facility:        inmate.facility,
+      bookingDate:     inmate.bookingDate,
+      status:          'in_custody',
+      firstSeen:       nowPST(),
+      releasedAt:      null,
+      charges:         detail.charges,
       hasDetail,
+      detailVersion:   hasDetail ? 2 : 0,
       ...detail.kvPairs,
     };
 
@@ -94,7 +95,7 @@ async function run() {
   // Backfill details for existing entries that were skipped on first run
   const BACKFILL_BATCH = 100;
   const needsDetail = Object.values(roster)
-    .filter(e => !e.hasDetail && e.status === 'in_custody')
+    .filter(e => (!e.hasDetail || (e.detailVersion || 0) < 2) && e.status === 'in_custody')
     .slice(0, BACKFILL_BATCH)
     .map(e => e.bookingNumber);
 
@@ -105,7 +106,7 @@ async function run() {
       for (const id of needsDetail) {
         const detail = backfillMap[id];
         if (!detail) continue;
-        roster[id] = { ...roster[id], charges: detail.charges, hasDetail: true, ...detail.kvPairs };
+        roster[id] = { ...roster[id], charges: detail.charges, hasDetail: true, detailVersion: 2, ...detail.kvPairs };
         const logEntry = log.find(e => e.bookingNumber === id);
         if (logEntry) Object.assign(logEntry, { charges: detail.charges, hasDetail: true, ...detail.kvPairs });
       }
