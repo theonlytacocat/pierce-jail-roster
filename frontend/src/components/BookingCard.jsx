@@ -52,22 +52,20 @@ export default function BookingCard({ entry }) {
               {entry.charges.map((c, i) => (
                 <div key={i} className="charge-row">
                   <div className="charge-violation">
-                    {c.violation || c['charge description'] || c['offense'] || c['charge'] || JSON.stringify(c)}
+                    {c.charge || c.violation || c['charge description'] || c['offense'] || JSON.stringify(c)}
+                    {c.counts && c.counts !== '1' && <span style={{ opacity: 0.55 }}> ×{c.counts}</span>}
                   </div>
-                  {(c.bail || c['bail amount'] || c.bondAmount) && (
-                    <div className="charge-bail">
-                      Bail: {c.bail || c['bail amount'] || c.bondAmount}
-                    </div>
+                  {c.bail != null && (
+                    <div className="charge-bail">Bail: ${Number(c.bail).toLocaleString()}</div>
                   )}
-                  {(c['court date'] || c.courtDate || c.nextCourtDate) && (
-                    <div className="charge-court">
-                      Court: {c['court date'] || c.courtDate || c.nextCourtDate}
-                    </div>
+                  {c.chargingAgency && (
+                    <div className="charge-agency">Agency: {c.chargingAgency}</div>
                   )}
-                  {(c.agency || c.arrestAgency || c['arresting agency']) && (
-                    <div className="charge-agency">
-                      Agency: {c.agency || c.arrestAgency || c['arresting agency']}
-                    </div>
+                  {c.jurisdiction && (
+                    <div className="charge-court">Court: {c.jurisdiction}</div>
+                  )}
+                  {c.causeNumber && (
+                    <div className="charge-court">Case: {c.causeNumber}</div>
                   )}
                 </div>
               ))}

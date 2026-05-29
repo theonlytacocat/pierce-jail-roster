@@ -4,6 +4,33 @@ import Header from './Header'
 
 const TABS = ['Summary', 'Trends', 'Charges', 'Demographics', 'Detention', 'Recidivism']
 
+// Pierce County, WA — 2020 Decennial Census (P8/P9)
+const CENSUS_POP = {
+  'White (non-Hispanic)':          569815,
+  'Black/African American':         66006,
+  'Hispanic/Latino':               111811,
+  'Asian':                          63460,
+  'American Indian/Alaska Native':  12777,
+  'Pacific Islander':               18844,
+  'Two or More Races':             116126,
+  'Other':                          48471,
+}
+const CENSUS_TOTAL = 921130
+
+function normalizeRace(e) {
+  const eth = (e.Ethnicity || e.ethnicity || '').toUpperCase()
+  if (eth.includes('HISPANIC') && !eth.includes('NON')) return 'Hispanic/Latino'
+  const r = (e.Race || e.race || '').toUpperCase()
+  if (r.includes('WHITE'))                                          return 'White (non-Hispanic)'
+  if (r.includes('BLACK'))                                          return 'Black/African American'
+  if (r.includes('ASIAN'))                                          return 'Asian'
+  if (r.includes('INDIAN') || r.includes('ALASKA'))                return 'American Indian/Alaska Native'
+  if (r.includes('PACIFIC') || r.includes('HAWAIIAN') || r.includes('ISLANDER')) return 'Pacific Islander'
+  if (r.includes('MULTI') || r.includes('TWO') || r.includes('MORE')) return 'Two or More Races'
+  if (r && r !== 'UNKNOWN' && r !== '')                            return 'Other'
+  return null
+}
+
 function HBar({ label, value, max, count }) {
   const pct = max > 0 ? Math.max(2, (value / max) * 100) : 0
   return (
@@ -120,7 +147,7 @@ function compute(log) {
     const d = parseStay(e)
     if (d === null) continue
     for (const c of (e.charges || []))
-      if (c.charge) {
+      if (c.charge && !/^WA\d+/i.test(c.charge)) {
         stayByCh[c.charge] = stayByCh[c.charge] || []
         stayByCh[c.charge].push(d)
       }
@@ -171,6 +198,13 @@ function compute(log) {
 
   const totalCharges = log.reduce((s, e) => s + (e.charges?.length || 0), 0)
 
+  const raceCensus = {}
+  for (const e of log) {
+    const r = normalizeRace(e)
+    if (r) raceCensus[r] = (raceCensus[r] || 0) + 1
+  }
+  const raceCensusTotal = Object.values(raceCensus).reduce((a, b) => a + b, 0)
+
   return {
     total: log.length,
     inCustody: log.filter(e => e.status === 'in_custody').length,
@@ -185,6 +219,7 @@ function compute(log) {
     pctUnder24h, shortestStay, longestHistorical, longestCurrent,
     repeats,
     uniqueNames: Object.keys(nameCt).length,
+    raceCensus, raceCensusTotal,
   }
 }
 
@@ -288,12 +323,55 @@ function ChargesTab({ s }) {
 function DemographicsTab({ s }) {
   const raceE = top(s.raceCt, 10)
   const genderE = top(s.genderCt, 5)
+  const unknownPct = s.total > 0 ? ((1 - s.raceCensusTotal / s.total) * 100).toFixed(0) : 0
+
+  const compRows = Object.entries(CENSUS_POP)
+    .map(([group, countyPop]) => {
+      const jailCount = s.raceCensus[group] || 0
+      const jailPct = s.raceCensusTotal > 0 ? jailCount / s.raceCensusTotal * 100 : 0
+      const countyPct = countyPop / CENSUS_TOTAL * 100
+      const ratio = countyPct > 0 ? jailPct / countyPct : null
+      return { group, jailPct, countyPct, ratio, jailCount }
+    })
+    .filter(r => r.jailCount > 0)
+    .sort((a, b) => (b.ratio || 0) - (a.ratio || 0))
+
   return (
     <>
-      <h3 className="stats-h3">Race</h3>
+      <h3 className="stats-h3">Race (raw LINX values)</h3>
       {raceE.map(([r, n]) => <HBar key={r} label={r} value={n} max={s.total} count={n} />)}
       <h3 className="stats-h3 stats-h3-gap">Gender</h3>
       {genderE.map(([g, n]) => <HBar key={g} label={g} value={n} max={s.total} count={n} />)}
+
+      <h3 className="stats-h3 stats-h3-gap">Representation vs. County Population</h3>
+      <div className="stats-note" style={{ marginBottom: '0.75rem' }}>
+        2020 U.S. Census · ratio = jail % ÷ county % · 1.00× is proportionate · {unknownPct}% of bookings excluded (no race/ethnicity data)
+      </div>
+      <table className="stats-table">
+        <thead>
+          <tr>
+            <th>Race/Ethnicity</th>
+            <th>Jail %</th>
+            <th>County %</th>
+            <th>Ratio</th>
+          </tr>
+        </thead>
+        <tbody>
+          {compRows.map(({ group, jailPct, countyPct, ratio }) => (
+            <tr key={group}>
+              <td>{group}</td>
+              <td>{jailPct.toFixed(1)}%</td>
+              <td>{countyPct.toFixed(1)}%</td>
+              <td style={{
+                color: ratio >= 2 ? '#E88A6A' : ratio >= 1.25 ? '#C5A87A' : ratio < 0.75 ? '#5A7A66' : '#8AAA96',
+                fontWeight: ratio >= 1.5 ? 500 : 400,
+              }}>
+                {ratio == null ? '—' : `${ratio.toFixed(2)}×`}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </>
   )
 }

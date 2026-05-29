@@ -92,10 +92,14 @@ async function run() {
     log.unshift(entry);
   }
 
-  // Backfill details for existing entries that were skipped on first run
+  // Backfill details for existing entries that were skipped on first run.
+  // Prioritize in_custody entries, then released — both may have old/missing detail data.
   const BACKFILL_BATCH = 100;
-  const needsDetail = Object.values(roster)
-    .filter(e => (!e.hasDetail || (e.detailVersion || 0) < 2) && e.status === 'in_custody')
+  const needsBackfill = e => (!e.hasDetail || (e.detailVersion || 0) < 2);
+  const needsDetail = [
+    ...Object.values(roster).filter(e => needsBackfill(e) && e.status === 'in_custody'),
+    ...Object.values(roster).filter(e => needsBackfill(e) && e.status === 'released'),
+  ]
     .slice(0, BACKFILL_BATCH)
     .map(e => e.bookingNumber);
 
@@ -108,7 +112,7 @@ async function run() {
         if (!detail) continue;
         roster[id] = { ...roster[id], charges: detail.charges, hasDetail: true, detailVersion: 2, ...detail.kvPairs };
         const logEntry = log.find(e => e.bookingNumber === id);
-        if (logEntry) Object.assign(logEntry, { charges: detail.charges, hasDetail: true, ...detail.kvPairs });
+        if (logEntry) Object.assign(logEntry, { charges: detail.charges, hasDetail: true, detailVersion: 2, ...detail.kvPairs });
       }
       console.log(`  Backfill done.`);
     } catch (err) {
