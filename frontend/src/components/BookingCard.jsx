@@ -1,5 +1,19 @@
 import { useState } from 'react'
 
+function formatTimeServed(firstSeen, releasedAt) {
+  if (!firstSeen || !releasedAt) return null
+  const start = new Date(firstSeen)
+  const end = new Date(releasedAt)
+  if (isNaN(start) || isNaN(end) || end <= start) return null
+  const totalMins = Math.floor((end - start) / 60000)
+  const days = Math.floor(totalMins / 1440)
+  const hours = Math.floor((totalMins % 1440) / 60)
+  const mins = totalMins % 60
+  if (days > 0) return `${days}d ${hours}h`
+  if (hours > 0) return `${hours}h ${mins}m`
+  return `${mins}m`
+}
+
 export default function BookingCard({ entry }) {
   const [open, setOpen] = useState(false)
   const isReleased = entry.status === 'released'
@@ -15,7 +29,12 @@ export default function BookingCard({ entry }) {
     <div className={`card ${isReleased ? 'card-released' : 'card-custody'}`}>
       <div className="card-header" onClick={() => setOpen(!open)}>
         <div className="card-left">
-          <div className="card-name">{entry.name}</div>
+          <div className="card-name">
+            {entry.name}
+            {isReleased && formatTimeServed(entry.firstSeen, entry.releasedAt) && (
+              <span className="time-served">{formatTimeServed(entry.firstSeen, entry.releasedAt)}</span>
+            )}
+          </div>
           <div className="card-meta">
             Booking #{entry.bookingNumber}
             {entry.bookingDate && <> &nbsp;·&nbsp; Booked: {entry.bookingDate}</>}
