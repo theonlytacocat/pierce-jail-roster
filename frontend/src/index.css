@@ -124,6 +124,7 @@ body {
 .card-header:hover { background: #1A261E; }
 
 .card-name { font-size: 0.95rem; font-weight: 500; color: #D5D9D4; margin-bottom: 0.2rem; }
+.time-served { margin-left: 0.5rem; font-size: 0.72rem; font-weight: 400; color: #8AAA8A; background: #1E2E1E; border: 1px solid #3A5A3A; border-radius: 3px; padding: 0.1rem 0.35rem; vertical-align: middle; white-space: nowrap; }
 .card-meta { font-size: 0.72rem; color: #6A8A76; }
 .card-right { display: flex; align-items: center; gap: 0.75rem; }
 .card-toggle { color: #4A7A5A; font-size: 0.65rem; }
@@ -147,7 +148,12 @@ body {
   font-size: 0.78rem;
   color: #8AAA8A;
   margin-bottom: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
 }
+.time-served-label { font-weight: 600; color: #A0C8A0; }
 
 .card-description {
   display: grid;
