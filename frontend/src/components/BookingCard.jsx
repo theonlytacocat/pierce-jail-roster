@@ -52,7 +52,12 @@ export default function BookingCard({ entry }) {
       {open && (
         <div className="card-body">
           {isReleased && entry.releasedAt && (
-            <div className="card-release-row">Released: {entry.releasedAt}</div>
+            <div className="card-release-row">
+              Released: {entry.releasedAt}
+              {formatTimeServed(entry.firstSeen, entry.releasedAt) && (
+                <span className="time-served-label">Time served: {formatTimeServed(entry.firstSeen, entry.releasedAt)}</span>
+              )}
+            </div>
           )}
 
           {(age || sex || race || height || weight) && (

@@ -148,7 +148,12 @@ body {
   font-size: 0.78rem;
   color: #8AAA8A;
   margin-bottom: 0.75rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
 }
+.time-served-label { font-weight: 600; color: #A0C8A0; }
 
 .card-description {
   display: grid;
